@@ -20,6 +20,7 @@ setMyPwsh 是一个面向 Windows 的 PowerShell 7 环境一键配置脚本，�
 - PSReadLine 历史预测和列表视图
 - Oh My Posh 主题
 - 重复运行时自动沿用已配置主题；通过 `-Theme NAME` 可以主动切换
+- 支持从固定目录选择本地 Oh My Posh 自定义主题
 - Git 快捷函数（不安装 Git）
 - 安装后的 `setMyPwsh` 本地管理命令
 
@@ -49,7 +50,25 @@ setMyPwsh repair
 setMyPwsh update
 ```
 
-其中 `setMyPwsh theme` 会显示主题菜单，`setMyPwsh theme atomic` 会直接切换到指定主题。`update` 会获取最新版 setMyPwsh 并重新应用配置。
+其中 `setMyPwsh theme` 会显示主题菜单，菜单第 8 项用于选择本地自定义主题；
+`setMyPwsh theme atomic` 会直接切换到指定官方主题。
+`update` 会获取最新版 setMyPwsh 并重新应用配置。
+
+### 自定义主题
+
+将自定义主题文件放入：
+
+```text
+%LOCALAPPDATA%\setMyPwsh\customThemes
+```
+
+然后运行：
+
+```powershell
+setMyPwsh theme
+```
+
+选择第 8 项后，脚本会列出目录中的主题文件供用户选择。支持 `.omp.json`、`.omp.yaml`、`.omp.yml` 和 `.omp.toml`，更新 setMyPwsh 时不会删除这些文件。
 
 运行前可以先[查看安装脚本](https://github.com/dhg007/setMyPwsh/blob/main/install.ps1)。
 
@@ -99,7 +118,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
 
 | 参数 | 作用 |
 | --- | --- |
-| `-Theme NAME` | 指定 Oh My Posh 主题 |
+| `-Theme NAME_OR_PATH` | 指定 Oh My Posh 官方主题名或本地自定义主题文件路径 |
 | `-Yes` | 自动接受安装步骤并使用默认选项 |
 | `-SkipFont` | 不安装 Meslo Nerd Font |
 | `-DryRun` | 只检查和预览，不产生更改 |
@@ -114,6 +133,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
 | 位置 | 用途 |
 | --- | --- |
 | `%LOCALAPPDATA%\setMyPwsh\setMyPwsh.ps1` | setMyPwsh 本地管理命令的实际脚本，会保留在本机 |
+| `%LOCALAPPDATA%\setMyPwsh\customThemes` | 用户自定义主题目录，setMyPwsh 更新时不会删除其中的文件 |
 | PowerShell 7 的 `$PROFILE.CurrentUserCurrentHost` | 写入受管配置区块；常见位置为 `%USERPROFILE%\Documents\PowerShell\Microsoft.PowerShell_profile.ps1`，实际路径由 PowerShell 7 决定 |
 | `<Profile路径>.setMyPwsh-backup-时间戳` | 修改已有 Profile 前生成的备份文件，与 Profile 放在同一目录 |
 | `%LOCALAPPDATA%\Packages\Microsoft.WindowsTerminal_8wekyb3d8bbwe\LocalState\settings.json` | Windows Terminal 稳定版配置；设置默认 Profile 和字体 |

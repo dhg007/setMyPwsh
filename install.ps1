@@ -10,7 +10,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$script:Version = '0.1.1'
+$script:Version = '0.2.0'
 $script:StartMarker = '# >>> setMyPwsh managed block >>>'
 $script:EndMarker = '# <<< setMyPwsh managed block <<<'
 $script:RecommendedThemes = @(
@@ -128,11 +128,26 @@ function Select-Theme {
     throw "无效的主题选择：$choice"
 }
 
-function Assert-ThemeName {
-    param([Parameter(Mandatory = $true)][string]$Name)
-    if ($Name -notmatch '^[A-Za-z0-9][A-Za-z0-9_.-]*$') {
-        throw '主题名只能包含字母、数字、点、下划线和连字符。'
+function Resolve-ThemeConfig {
+    param([Parameter(Mandatory = $true)][string]$Value)
+
+    if ($Value -match '^[A-Za-z0-9][A-Za-z0-9_.-]*$') {
+        return $Value
     }
+
+    $expanded = [Environment]::ExpandEnvironmentVariables($Value)
+    try {
+        $fullPath = [IO.Path]::GetFullPath($expanded)
+    } catch {
+        throw "无效的自定义主题路径：$Value"
+    }
+    if ($fullPath -notmatch '(?i)\.omp\.(json|ya?ml|toml)$') {
+        throw '自定义主题文件必须以 .omp.json、.omp.yaml、.omp.yml 或 .omp.toml 结尾。'
+    }
+    if (-not (Test-Path -LiteralPath $fullPath -PathType Leaf)) {
+        throw "找不到自定义主题文件：$fullPath"
+    }
+    return $fullPath
 }
 
 function Get-ConfiguredTheme {
@@ -151,10 +166,10 @@ function Get-ConfiguredTheme {
     $managedBlock = $content.Substring($start, $end - $start)
     $match = [regex]::Match(
         $managedBlock,
-        "(?m)^\s*oh-my-posh\s+init\s+pwsh\s+--config\s+'(?<theme>[A-Za-z0-9][A-Za-z0-9_.-]*)'"
+        "(?m)^\s*oh-my-posh\s+init\s+pwsh\s+--config\s+'(?<theme>(?:''|[^'])*)'"
     )
     if ($match.Success) {
-        return $match.Groups['theme'].Value
+        return $match.Groups['theme'].Value.Replace("''", "'")
     }
     return $null
 }
@@ -246,7 +261,8 @@ function gba   { git branch --all @args }
 function setMyPwsh { & "$env:LOCALAPPDATA\setMyPwsh\setMyPwsh.ps1" @args }
 # <<< setMyPwsh managed block <<<
 '@
-    return $template.Replace('{{THEME}}', $ThemeName)
+    $escapedTheme = $ThemeName.Replace("'", "''")
+    return $template.Replace('{{THEME}}', $escapedTheme)
 }
 
 function Resolve-CommandInstallPath {
@@ -275,6 +291,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $installerUrl = 'https://raw.githubusercontent.com/dhg007/setMyPwsh/main/install.ps1'
 $themes = @('jandedobbeleer', 'atomic', 'paradox', 'powerlevel10k_rainbow', 'tokyo', 'minimal')
+$customThemesDirectory = Join-Path $PSScriptRoot 'customThemes'
 
 function Get-InstallerBlock {
     Write-Host '正在获取最新版 setMyPwsh...' -ForegroundColor Cyan
@@ -292,19 +309,46 @@ function Invoke-Installer {
     }
 }
 
+function Select-CustomTheme {
+    [void](New-Item -ItemType Directory -Force -Path $customThemesDirectory)
+    $customThemes = @(
+        Get-ChildItem -LiteralPath $customThemesDirectory -File -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -match '(?i)\.omp\.(json|ya?ml|toml)$' } |
+            Sort-Object Name
+    )
+    if ($customThemes.Count -eq 0) {
+        Write-Host "未找到自定义主题，请先把主题文件放入：$customThemesDirectory" -ForegroundColor Yellow
+        return $null
+    }
+
+    Write-Host "自定义主题目录：$customThemesDirectory"
+    for ($index = 0; $index -lt $customThemes.Count; $index++) {
+        Write-Host ('  {0}. {1}' -f ($index + 1), $customThemes[$index].Name)
+    }
+    $choice = Read-Host "选择 [1-$($customThemes.Count)]（默认 1）"
+    if ([string]::IsNullOrWhiteSpace($choice)) { $choice = '1' }
+    $number = 0
+    if ([int]::TryParse($choice, [ref]$number) -and $number -ge 1 -and $number -le $customThemes.Count) {
+        return $customThemes[$number - 1].FullName
+    }
+    throw "无效的自定义主题选择：$choice"
+}
+
 function Select-Theme {
     Write-Host '请选择 Oh My Posh 主题：'
     for ($index = 0; $index -lt $themes.Count; $index++) {
         Write-Host ('  {0}. {1}' -f ($index + 1), $themes[$index])
     }
     Write-Host '  7. 输入其他主题名'
-    $choice = Read-Host '选择 [1-7]（默认 1）'
+    Write-Host '  8. 选择自定义主题'
+    $choice = Read-Host '选择 [1-8]（默认 1）'
     if ([string]::IsNullOrWhiteSpace($choice)) { return $themes[0] }
     $number = 0
     if ([int]::TryParse($choice, [ref]$number) -and $number -ge 1 -and $number -le $themes.Count) {
         return $themes[$number - 1]
     }
     if ($choice -eq '7') { return Read-Host '请输入主题名' }
+    if ($choice -eq '8') { return Select-CustomTheme }
     throw "无效的主题选择：$choice"
 }
 
@@ -332,6 +376,7 @@ switch ($Command.ToLowerInvariant()) {
     'theme' {
         $theme = $Value
         if ([string]::IsNullOrWhiteSpace($theme)) { $theme = Select-Theme }
+        if ([string]::IsNullOrWhiteSpace($theme)) { return }
         Invoke-Installer -ThemeName $theme
     }
     'check' {
@@ -350,6 +395,7 @@ setMyPwsh 管理命令
 用法：
   setMyPwsh theme              交互选择并切换主题
   setMyPwsh theme atomic       直接切换到指定主题
+  自定义主题目录               $customThemesDirectory
   setMyPwsh check              检查组件状态
   setMyPwsh repair             重新检查并应用配置
   setMyPwsh update             获取最新版并重新应用配置
@@ -364,6 +410,7 @@ setMyPwsh 管理命令
 
     $directory = Split-Path -Parent $Path
     [void](New-Item -ItemType Directory -Force -Path $directory)
+    [void](New-Item -ItemType Directory -Force -Path (Join-Path $directory 'customThemes'))
     $tempPath = Join-Path $directory ('.setMyPwsh-command-' + [Guid]::NewGuid().ToString('N') + '.tmp')
     try {
         [IO.File]::WriteAllText($tempPath, $managementScript, [Text.UTF8Encoding]::new($true))
@@ -751,7 +798,7 @@ function Invoke-SetMyPwsh {
             $selectedTheme = Select-Theme
         }
     }
-    Assert-ThemeName -Name $selectedTheme
+    $selectedTheme = Resolve-ThemeConfig -Value $selectedTheme
     $managementCommandPath = Resolve-CommandInstallPath
     Install-ManagementCommand -Path $managementCommandPath
     Set-PowerShellProfile -Path $resolvedProfile -ThemeName $selectedTheme

@@ -58,6 +58,40 @@ param([string]`$Theme)
         throw '管理命令没有把 atomic 正确绑定到安装脚本的 Theme 参数。'
     }
 
+    $customThemesPath = Join-Path (Split-Path -Parent $commandPath) 'customThemes'
+    if (-not (Test-Path -LiteralPath $customThemesPath -PathType Container)) {
+        throw '自定义主题目录未创建。'
+    }
+    $customThemePath = Join-Path $customThemesPath "one'dark.omp.json"
+    [IO.File]::WriteAllText($customThemePath, '{"version":4,"blocks":[]}', [Text.UTF8Encoding]::new($false))
+
+    $customMenuTestPath = Join-Path $testRoot 'custom-theme-menu-test.ps1'
+    $customThemeCapturePath = Join-Path $testRoot 'forwarded-custom-theme.txt'
+    [IO.File]::WriteAllText($customMenuTestPath, @'
+param(
+    [string]$ManagementCommandPath,
+    [string]$CapturePath
+)
+
+$env:SETMYPWSH_THEME_CAPTURE = $CapturePath
+$global:setMyPwshTestAnswers = [Collections.Generic.Queue[string]]::new()
+$global:setMyPwshTestAnswers.Enqueue('8')
+$global:setMyPwshTestAnswers.Enqueue('1')
+function Read-Host { return $global:setMyPwshTestAnswers.Dequeue() }
+function Invoke-RestMethod {
+    return @"
+param([string]`$Theme)
+[IO.File]::WriteAllText(`$env:SETMYPWSH_THEME_CAPTURE, `$Theme)
+"@
+}
+& $ManagementCommandPath theme
+'@, [Text.UTF8Encoding]::new($true))
+    & pwsh.exe -NoLogo -NoProfile -File $customMenuTestPath -ManagementCommandPath $commandPath -CapturePath $customThemeCapturePath
+    if ($LASTEXITCODE -ne 0) { throw '自定义主题菜单测试失败。' }
+    if ([IO.File]::ReadAllText($customThemeCapturePath) -ne $customThemePath) {
+        throw '菜单第 8 项没有正确转发自定义主题路径。'
+    }
+
     $terminal = [IO.File]::ReadAllText($terminalSettingsPath) | ConvertFrom-Json
     if ($terminal.defaultProfile -ne '{574e775e-4f2a-5b96-ac1e-a2962a402336}') {
         throw 'Windows Terminal 默认 Profile 未设置为 PowerShell 7。'
@@ -87,6 +121,19 @@ param([string]`$Theme)
     if ($third -cne $second) { throw '未指定主题重复运行后，已有主题或文件内容发生变化。' }
     if ($third -notmatch "--config 'paradox'") { throw '重复运行时没有沿用已有主题。' }
     if ($backupsAfterNoChange.Count -ne $backups.Count) { throw '无变化时不应创建新备份。' }
+
+    & $scriptPath -Yes -Theme $customThemePath -SkipFont -ProfilePath $profilePath -TerminalSettingsPath $terminalSettingsPath -CommandInstallPath $commandPath
+    $customProfile = [IO.File]::ReadAllText($profilePath)
+    $escapedCustomTheme = $customThemePath.Replace("'", "''")
+    if ($customProfile -notmatch [regex]::Escape("--config '$escapedCustomTheme'")) {
+        throw '自定义主题路径没有安全写入 Profile。'
+    }
+
+    & $scriptPath -Yes -SkipFont -ProfilePath $profilePath -TerminalSettingsPath $terminalSettingsPath -CommandInstallPath $commandPath
+    $customProfileRepeated = [IO.File]::ReadAllText($profilePath)
+    if ($customProfileRepeated -cne $customProfile) {
+        throw '重复运行时没有保留自定义主题配置。'
+    }
 
     $activationTestPath = Join-Path $testRoot 'activation-test.ps1'
     [IO.File]::WriteAllText($activationTestPath, @'
