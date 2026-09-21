@@ -5,7 +5,8 @@ param(
     [switch]$SkipFont,
     [switch]$DryRun,
     [string]$ProfilePath,
-    [string]$TerminalSettingsPath
+    [string]$TerminalSettingsPath,
+    [string]$CommandInstallPath
 )
 
 $ErrorActionPreference = 'Stop'
@@ -34,6 +35,20 @@ function Write-Ok {
 function Write-Warn {
     param([string]$Message)
     Write-Host "[!] $Message" -ForegroundColor Yellow
+}
+
+function Test-IsPowerShell7 {
+    return $PSVersionTable.PSEdition -eq 'Core' -and $PSVersionTable.PSVersion.Major -ge 7
+}
+
+function Test-IsInteractiveConsole {
+    try {
+        return $Host.Name -eq 'ConsoleHost' -and
+            -not [Console]::IsInputRedirected -and
+            -not [Console]::IsOutputRedirected
+    } catch {
+        return $false
+    }
 }
 
 function Test-CommandExists {
@@ -227,9 +242,183 @@ function ga    { git add @args }
 function gco   { git checkout @args }
 function gb    { git branch @args }
 function gba   { git branch --all @args }
+
+function setMyPwsh { & "$env:LOCALAPPDATA\setMyPwsh\setMyPwsh.ps1" @args }
 # <<< setMyPwsh managed block <<<
 '@
     return $template.Replace('{{THEME}}', $ThemeName)
+}
+
+function Resolve-CommandInstallPath {
+    if (-not [string]::IsNullOrWhiteSpace($CommandInstallPath)) {
+        return [IO.Path]::GetFullPath($CommandInstallPath)
+    }
+    return Join-Path $env:LOCALAPPDATA 'setMyPwsh\setMyPwsh.ps1'
+}
+
+function Install-ManagementCommand {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    Write-Step '安装 setMyPwsh 管理命令'
+    if ($DryRun) {
+        Write-Host "[DryRun] 将安装：$Path"
+        return
+    }
+
+    $managementScript = @'
+[CmdletBinding()]
+param(
+    [Parameter(Position = 0)][string]$Command = 'help',
+    [Parameter(Position = 1)][string]$Value
+)
+
+$ErrorActionPreference = 'Stop'
+$installerUrl = 'https://raw.githubusercontent.com/dhg007/setMyPwsh/main/install.ps1'
+$themes = @('jandedobbeleer', 'atomic', 'paradox', 'powerlevel10k_rainbow', 'tokyo', 'minimal')
+
+function Get-InstallerBlock {
+    Write-Host '正在获取最新版 setMyPwsh...' -ForegroundColor Cyan
+    $source = Invoke-RestMethod -Uri $installerUrl -UseBasicParsing
+    return [scriptblock]::Create($source.TrimStart([char]0xFEFF))
+}
+
+function Invoke-Installer {
+    param([string[]]$Arguments)
+    $installer = Get-InstallerBlock
+    & $installer @Arguments
+}
+
+function Select-Theme {
+    Write-Host '请选择 Oh My Posh 主题：'
+    for ($index = 0; $index -lt $themes.Count; $index++) {
+        Write-Host ('  {0}. {1}' -f ($index + 1), $themes[$index])
+    }
+    Write-Host '  7. 输入其他主题名'
+    $choice = Read-Host '选择 [1-7]（默认 1）'
+    if ([string]::IsNullOrWhiteSpace($choice)) { return $themes[0] }
+    $number = 0
+    if ([int]::TryParse($choice, [ref]$number) -and $number -ge 1 -and $number -le $themes.Count) {
+        return $themes[$number - 1]
+    }
+    if ($choice -eq '7') { return Read-Host '请输入主题名' }
+    throw "无效的主题选择：$choice"
+}
+
+function Show-Status {
+    $commands = @(
+        @{ Name = 'WinGet'; Command = 'winget.exe' },
+        @{ Name = 'Windows Terminal'; Command = 'wt.exe' },
+        @{ Name = 'PowerShell 7'; Command = 'pwsh.exe' },
+        @{ Name = 'Oh My Posh'; Command = 'oh-my-posh.exe' }
+    )
+    foreach ($item in $commands) {
+        $found = Get-Command $item.Command -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($found) {
+            Write-Host ('[OK] {0,-18} {1}' -f $item.Name, $found.Source) -ForegroundColor Green
+        } else {
+            Write-Host ('[--] {0,-18} 未安装' -f $item.Name) -ForegroundColor Yellow
+        }
+    }
+    if ($env:POSH_THEME) {
+        Write-Host "当前主题配置：$env:POSH_THEME"
+    }
+}
+
+switch ($Command.ToLowerInvariant()) {
+    'theme' {
+        $theme = $Value
+        if ([string]::IsNullOrWhiteSpace($theme)) { $theme = Select-Theme }
+        Invoke-Installer -Arguments @('-Theme', $theme)
+    }
+    'check' {
+        Show-Status
+    }
+    'repair' {
+        Invoke-Installer -Arguments @()
+    }
+    'update' {
+        Invoke-Installer -Arguments @()
+    }
+    { $_ -in @('help', '-h', '--help') } {
+        Write-Host @"
+setMyPwsh 管理命令
+
+用法：
+  setMyPwsh theme              交互选择并切换主题
+  setMyPwsh theme atomic       直接切换到指定主题
+  setMyPwsh check              检查组件状态
+  setMyPwsh repair             重新检查并应用配置
+  setMyPwsh update             获取最新版并重新应用配置
+  setMyPwsh help               显示帮助
+"@
+    }
+    default {
+        throw "未知命令：$Command。运行 setMyPwsh help 查看帮助。"
+    }
+}
+'@
+
+    $directory = Split-Path -Parent $Path
+    [void](New-Item -ItemType Directory -Force -Path $directory)
+    $tempPath = Join-Path $directory ('.setMyPwsh-command-' + [Guid]::NewGuid().ToString('N') + '.tmp')
+    try {
+        [IO.File]::WriteAllText($tempPath, $managementScript, [Text.UTF8Encoding]::new($true))
+        $tokens = $null
+        $parseErrors = $null
+        [void][System.Management.Automation.Language.Parser]::ParseFile($tempPath, [ref]$tokens, [ref]$parseErrors)
+        if ($parseErrors.Count -gt 0) {
+            throw "生成的 setMyPwsh 管理脚本存在语法错误：$($parseErrors[0].Message)"
+        }
+        if (Test-Path -LiteralPath $Path -PathType Leaf) {
+            Remove-Item -LiteralPath $Path -Force
+        }
+        [IO.File]::Move($tempPath, $Path)
+    } finally {
+        if (Test-Path -LiteralPath $tempPath) {
+            Remove-Item -LiteralPath $tempPath -Force
+        }
+    }
+    Write-Ok "管理命令已安装：$Path"
+}
+
+function Enable-CurrentShellExperience {
+    param(
+        [Parameter(Mandatory = $true)][string]$PwshPath,
+        [Parameter(Mandatory = $true)][string]$ThemeName,
+        [Parameter(Mandatory = $true)][string]$ManagementCommandPath
+    )
+
+    if ($DryRun) { return }
+
+    if (Test-IsPowerShell7) {
+        $escapedCommandPath = $ManagementCommandPath.Replace("'", "''")
+        $commandBody = [scriptblock]::Create("& '$escapedCommandPath' @args")
+        Set-Item -Path Function:\global:setMyPwsh -Value $commandBody -Force
+
+        if (Test-IsInteractiveConsole) {
+            Import-Module PSReadLine -ErrorAction SilentlyContinue
+            Set-PSReadLineOption -PredictionSource History -ErrorAction SilentlyContinue
+            Set-PSReadLineOption -PredictionViewStyle ListView -ErrorAction SilentlyContinue
+        }
+
+        $ohMyPosh = Find-Executable 'oh-my-posh.exe'
+        if (-not [string]::IsNullOrWhiteSpace($ohMyPosh)) {
+            Remove-Module oh-my-posh-core -Force -ErrorAction SilentlyContinue
+            & $ohMyPosh init pwsh --config $ThemeName | Invoke-Expression
+        }
+
+        Write-Ok '当前 PowerShell 7 会话已立即启用新配置。'
+        return
+    }
+
+    if (Test-IsInteractiveConsole) {
+        Write-Host "`n当前是 Windows PowerShell $($PSVersionTable.PSVersion)。正在为你进入 PowerShell 7..." -ForegroundColor Cyan
+        Write-Host '进入后可直接运行：setMyPwsh help' -ForegroundColor Cyan
+        & $PwshPath
+        return
+    }
+
+    Write-Warn '当前不是 PowerShell 7，且此环境不能自动启动交互会话。请运行 pwsh 进入 PowerShell 7。'
 }
 
 function Merge-ManagedBlock {
@@ -559,6 +748,8 @@ function Invoke-SetMyPwsh {
         }
     }
     Assert-ThemeName -Name $selectedTheme
+    $managementCommandPath = Resolve-CommandInstallPath
+    Install-ManagementCommand -Path $managementCommandPath
     Set-PowerShellProfile -Path $resolvedProfile -ThemeName $selectedTheme
 
     $ompPath = Find-Executable 'oh-my-posh.exe'
@@ -572,7 +763,8 @@ function Invoke-SetMyPwsh {
     Set-WindowsTerminalDefaults -PwshPath $pwshPath -SettingsPath $terminalSettings
 
     Write-Host "`n完成！主题：$selectedTheme" -ForegroundColor Green
-    Write-Host '请关闭并重新打开 Windows Terminal。'
+    Write-Host 'Windows Terminal 的默认 Profile 和字体将在新标签页中生效。'
+    Enable-CurrentShellExperience -PwshPath $pwshPath -ThemeName $selectedTheme -ManagementCommandPath $managementCommandPath
 }
 
 try {

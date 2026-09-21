@@ -15,6 +15,7 @@
 - Oh My Posh 主题
 - 重复运行时自动沿用已配置主题；通过 `-Theme NAME` 可以主动切换
 - Git 快捷函数（不安装 Git）
+- 安装后的 `setMyPwsh` 本地管理命令
 
 ## 本地运行
 
@@ -50,6 +51,30 @@ iex ((irm https://raw.githubusercontent.com/dhg007/setMyPwsh/main/install.ps1).T
 
 这里显式移除 UTF-8 BOM，以兼容系统自带的 Windows PowerShell 5.1。不要简写成 `irm URL | iex`。
 
+首次安装完成后：
+
+- 如果当前是 PowerShell 7，脚本会立即启用主题和 `setMyPwsh` 命令。
+- 如果当前是交互式 Windows PowerShell 5.1，脚本会自动执行 `pwsh`，进入已经配置好的 PowerShell 7。
+- Windows Terminal 的默认 Profile 和字体会在新标签页中生效。
+
+随后可以直接使用本地管理命令：
+
+```powershell
+setMyPwsh theme
+setMyPwsh theme atomic
+setMyPwsh check
+setMyPwsh repair
+setMyPwsh update
+```
+
+其中 `setMyPwsh theme` 会显示主题菜单，`setMyPwsh theme atomic` 会直接切换到指定主题。`update` 会获取最新版 setMyPwsh 并重新应用配置。
+
+高级用户如需在首次远程安装时传递参数，可以把下载内容转换成 ScriptBlock：
+
+```powershell
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/dhg007/setMyPwsh/main/install.ps1).TrimStart([char]0xFEFF))) -Yes -Theme atomic -SkipFont
+```
+
 建议在发布文档中同时提供“先查看脚本”的链接，不要使用会随意指向不同内容的短网址。
 
 ## Profile 安全策略
@@ -68,6 +93,8 @@ iex ((irm https://raw.githubusercontent.com/dhg007/setMyPwsh/main/install.ps1).T
 
 ## 参数
 
+以下参数在本地执行 `install.ps1` 时可以直接使用。远程执行时，请使用上面的 ScriptBlock 写法传递参数；不能把参数直接追加到 `irm ... | iex` 后面。
+
 | 参数 | 作用 |
 | --- | --- |
 | `-Theme NAME` | 指定 Oh My Posh 主题 |
@@ -76,3 +103,4 @@ iex ((irm https://raw.githubusercontent.com/dhg007/setMyPwsh/main/install.ps1).T
 | `-DryRun` | 只检查和预览，不产生更改 |
 | `-ProfilePath PATH` | 指定 Profile 路径，主要用于测试 |
 | `-TerminalSettingsPath PATH` | 指定 Windows Terminal 配置路径，主要用于测试 |
+| `-CommandInstallPath PATH` | 指定管理脚本安装路径，主要用于测试 |
