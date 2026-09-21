@@ -41,8 +41,10 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
 在 Windows PowerShell 中运行：
 
 ```powershell
-irm https://raw.githubusercontent.com/dhg007/setMyPwsh/main/install.ps1 | iex
+iex ((irm https://raw.githubusercontent.com/dhg007/setMyPwsh/main/install.ps1).TrimStart([char]0xFEFF))
 ```
+
+这里显式移除 UTF-8 BOM，以兼容系统自带的 Windows PowerShell 5.1。不要简写成 `irm URL | iex`。
 
 建议在发布文档中同时提供“先查看脚本”的链接，不要使用会随意指向不同内容的短网址。
 
