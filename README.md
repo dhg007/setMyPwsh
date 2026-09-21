@@ -13,6 +13,7 @@
 - 将 Windows Terminal 默认字体设置为 MesloLGM Nerd Font
 - PSReadLine 历史预测和列表视图
 - Oh My Posh 主题
+- 重复运行时自动沿用已配置主题；通过 `-Theme NAME` 可以主动切换
 - Git 快捷函数（不安装 Git）
 
 ## 本地运行

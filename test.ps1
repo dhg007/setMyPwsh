@@ -53,10 +53,11 @@ try {
     $backups = @(Get-ChildItem -LiteralPath $testRoot -Filter '*.setMyPwsh-backup-*')
     if ($backups.Count -lt 2) { throw '没有按预期创建 Profile 备份。' }
 
-    & $scriptPath -Yes -Theme paradox -SkipFont -ProfilePath $profilePath -TerminalSettingsPath $terminalSettingsPath
+    & $scriptPath -Yes -SkipFont -ProfilePath $profilePath -TerminalSettingsPath $terminalSettingsPath
     $third = [IO.File]::ReadAllText($profilePath)
     $backupsAfterNoChange = @(Get-ChildItem -LiteralPath $testRoot -Filter '*.setMyPwsh-backup-*')
-    if ($third -cne $second) { throw '相同配置重复运行后文件发生变化。' }
+    if ($third -cne $second) { throw '未指定主题重复运行后，已有主题或文件内容发生变化。' }
+    if ($third -notmatch "--config 'paradox'") { throw '重复运行时没有沿用已有主题。' }
     if ($backupsAfterNoChange.Count -ne $backups.Count) { throw '无变化时不应创建新备份。' }
 
     Write-Host 'All tests passed.' -ForegroundColor Green

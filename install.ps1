@@ -120,6 +120,30 @@ function Assert-ThemeName {
     }
 }
 
+function Get-ConfiguredTheme {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        return $null
+    }
+    $content = [IO.File]::ReadAllText($Path)
+    $start = $content.IndexOf($script:StartMarker, [StringComparison]::Ordinal)
+    $end = $content.IndexOf($script:EndMarker, [StringComparison]::Ordinal)
+    if ($start -lt 0 -or $end -le $start) {
+        return $null
+    }
+
+    $managedBlock = $content.Substring($start, $end - $start)
+    $match = [regex]::Match(
+        $managedBlock,
+        "(?m)^\s*oh-my-posh\s+init\s+pwsh\s+--config\s+'(?<theme>[A-Za-z0-9][A-Za-z0-9_.-]*)'"
+    )
+    if ($match.Success) {
+        return $match.Groups['theme'].Value
+    }
+    return $null
+}
+
 function Get-ComponentStatus {
     $items = @(
         [pscustomobject]@{ Name = 'WinGet'; Command = 'winget.exe'; Package = $null },
@@ -479,9 +503,6 @@ function Invoke-SetMyPwsh {
     Write-Host "setMyPwsh 一键安装脚本 v$script:Version" -ForegroundColor Cyan
     if ($DryRun) { Write-Warn 'Dry Run 模式：不会安装软件或修改文件。' }
 
-    $selectedTheme = Select-Theme
-    Assert-ThemeName -Name $selectedTheme
-
     Write-Step '检查环境'
     $status = @(Get-ComponentStatus)
     Show-ComponentStatus -Status $status
@@ -526,6 +547,18 @@ function Invoke-SetMyPwsh {
     } else {
         Resolve-ProfilePath -PwshPath $pwshPath
     }
+
+    if (-not [string]::IsNullOrWhiteSpace($Theme)) {
+        $selectedTheme = $Theme
+    } else {
+        $selectedTheme = Get-ConfiguredTheme -Path $resolvedProfile
+        if (-not [string]::IsNullOrWhiteSpace($selectedTheme)) {
+            Write-Ok "已配置 Oh My Posh 主题：$selectedTheme"
+        } else {
+            $selectedTheme = Select-Theme
+        }
+    }
+    Assert-ThemeName -Name $selectedTheme
     Set-PowerShellProfile -Path $resolvedProfile -ThemeName $selectedTheme
 
     $ompPath = Find-Executable 'oh-my-posh.exe'
