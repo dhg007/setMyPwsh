@@ -1,5 +1,9 @@
 # setMyPwsh 一键安装脚本
 
+setMyPwsh 是一个面向 Windows 的 PowerShell 7 环境一键配置脚本，适合在新电脑上快速搭建现代化命令行环境。只需运行一条命令，它就会安装所需组件、配置终端和 PowerShell Profile，并启用主题、命令预测与常用 Git 快捷命令。
+
+脚本支持重复执行，不会重复追加配置；安装完成后还可以通过 `setMyPwsh` 命令检查环境、修复配置或随时切换 Oh My Posh 主题。
+
 [仓库地址](https://github.com/dhg007/setMyPwsh)
 
 支持在 Windows PowerShell 5.1 或 PowerShell 7 中一键安装。
