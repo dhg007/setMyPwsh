@@ -4,7 +4,8 @@ param(
     [switch]$Yes,
     [switch]$SkipFont,
     [switch]$DryRun,
-    [string]$ProfilePath
+    [string]$ProfilePath,
+    [string]$TerminalSettingsPath
 )
 
 $ErrorActionPreference = 'Stop'
@@ -291,10 +292,50 @@ function Set-PowerShellProfile {
     }
 }
 
+function Test-NerdFontInstalled {
+    param(
+        [Parameter(Mandatory = $true)][string]$OhMyPoshPath,
+        [Parameter(Mandatory = $true)][string]$FontName
+    )
+
+    # 新版 Oh My Posh 能直接报告由它安装的字体状态。
+    try {
+        $fontStateOutput = & $OhMyPoshPath font dsc get 2>$null
+        if ($LASTEXITCODE -eq 0 -and $fontStateOutput) {
+            $fontState = ($fontStateOutput -join [Environment]::NewLine) | ConvertFrom-Json
+            if (@($fontState.states | ForEach-Object { $_.name }) -contains $FontName) {
+                return $true
+            }
+        }
+    } catch {
+        # 兼容尚未支持 font dsc 的旧版本，继续检查 Windows 字体注册表。
+    }
+
+    $fontRegistryPaths = @(
+        'HKCU:\Software\Microsoft\Windows NT\CurrentVersion\Fonts',
+        'HKLM:\Software\Microsoft\Windows NT\CurrentVersion\Fonts'
+    )
+    foreach ($registryPath in $fontRegistryPaths) {
+        try {
+            $fontKey = Get-Item -LiteralPath $registryPath -ErrorAction Stop
+            if (@($fontKey.GetValueNames() | Where-Object { $_ -like 'Meslo*Nerd Font*' }).Count -gt 0) {
+                return $true
+            }
+        } catch {
+            # 当前用户可能没有权限读取某些系统级注册表项。
+        }
+    }
+    return $false
+}
+
 function Install-NerdFont {
     param([Parameter(Mandatory = $true)][string]$OhMyPoshPath)
     if ($SkipFont) {
         Write-Warn '已跳过 Nerd Font 安装。'
+        return
+    }
+    if (Test-NerdFontInstalled -OhMyPoshPath $OhMyPoshPath -FontName 'Meslo') {
+        Write-Ok 'Meslo Nerd Font 已安装，跳过字体安装。'
         return
     }
     if (-not (Confirm-Action -Message '是否安装 Meslo Nerd Font？' -DefaultYes $true)) {
@@ -310,7 +351,124 @@ function Install-NerdFont {
         Write-Warn "字体安装失败，退出代码：$LASTEXITCODE"
         return
     }
-    Write-Ok 'Meslo Nerd Font 安装完成。请在 Windows Terminal 中选择 MesloLGM Nerd Font。'
+    Write-Ok 'Meslo Nerd Font 安装完成。'
+}
+
+function Resolve-WindowsTerminalSettingsPath {
+    if (-not [string]::IsNullOrWhiteSpace($TerminalSettingsPath)) {
+        return [IO.Path]::GetFullPath($TerminalSettingsPath)
+    }
+
+    $candidates = @(
+        (Join-Path $env:LOCALAPPDATA 'Packages\Microsoft.WindowsTerminal_8wekyb3d8bbwe\LocalState\settings.json'),
+        (Join-Path $env:LOCALAPPDATA 'Packages\Microsoft.WindowsTerminalPreview_8wekyb3d8bbwe\LocalState\settings.json'),
+        (Join-Path $env:LOCALAPPDATA 'Microsoft\Windows Terminal\settings.json')
+    )
+    foreach ($candidate in $candidates) {
+        if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+            return $candidate
+        }
+    }
+
+    # setMyPwsh 安装的是稳定版 Windows Terminal。首次启动前 settings.json 可能尚不存在。
+    return $candidates[0]
+}
+
+function Set-WindowsTerminalDefaults {
+    param(
+        [Parameter(Mandatory = $true)][string]$PwshPath,
+        [Parameter(Mandatory = $true)][string]$SettingsPath
+    )
+
+    Write-Step '配置 Windows Terminal'
+    if ($DryRun) {
+        Write-Host "[DryRun] 将更新：$SettingsPath"
+        Write-Host '[DryRun] 默认 Profile：PowerShell 7'
+        Write-Host '[DryRun] 默认字体：MesloLGM Nerd Font'
+        return
+    }
+
+    $editor = @'
+$ErrorActionPreference = 'Stop'
+$path = $env:SETMYPWSH_TERMINAL_SETTINGS
+$powerShellGuid = '{574e775e-4f2a-5b96-ac1e-a2962a402336}'
+
+if (Test-Path -LiteralPath $path -PathType Leaf) {
+    $original = [IO.File]::ReadAllText($path)
+    $settings = $original | ConvertFrom-Json -AsHashtable
+} else {
+    $original = ''
+    $settings = [ordered]@{
+        '$help' = 'https://aka.ms/terminal-documentation'
+        '$schema' = 'https://aka.ms/terminal-profiles-schema'
+    }
+}
+
+$settings['defaultProfile'] = $powerShellGuid
+
+if (-not $settings.Contains('profiles') -or $null -eq $settings['profiles']) {
+    $settings['profiles'] = [ordered]@{
+        'defaults' = [ordered]@{}
+        'list' = @()
+    }
+} elseif ($settings['profiles'] -is [System.Collections.IList]) {
+    $oldList = $settings['profiles']
+    $settings['profiles'] = [ordered]@{
+        'defaults' = [ordered]@{}
+        'list' = $oldList
+    }
+}
+
+$profiles = $settings['profiles']
+if (-not $profiles.Contains('defaults') -or $null -eq $profiles['defaults']) {
+    $profiles['defaults'] = [ordered]@{}
+}
+$defaults = $profiles['defaults']
+if (-not $defaults.Contains('font') -or $null -eq $defaults['font']) {
+    $defaults['font'] = [ordered]@{}
+}
+$defaults['font']['face'] = 'MesloLGM Nerd Font'
+
+$json = $settings | ConvertTo-Json -Depth 100
+if ($original.TrimEnd() -ceq $json.TrimEnd()) {
+    Write-Output 'unchanged'
+    exit 0
+}
+
+$directory = Split-Path -Parent $path
+[void](New-Item -ItemType Directory -Force -Path $directory)
+$tempPath = Join-Path $directory ('.setMyPwsh-terminal-' + [Guid]::NewGuid().ToString('N') + '.tmp')
+try {
+    [IO.File]::WriteAllText($tempPath, $json + [Environment]::NewLine, [Text.UTF8Encoding]::new($false))
+    $null = [IO.File]::ReadAllText($tempPath) | ConvertFrom-Json
+    [IO.File]::Move($tempPath, $path, $true)
+} finally {
+    if (Test-Path -LiteralPath $tempPath) {
+        Remove-Item -LiteralPath $tempPath -Force
+    }
+}
+Write-Output 'updated'
+'@
+
+    $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($editor))
+    $previousPath = $env:SETMYPWSH_TERMINAL_SETTINGS
+    try {
+        $env:SETMYPWSH_TERMINAL_SETTINGS = $SettingsPath
+        $result = & $PwshPath -NoLogo -NoProfile -NonInteractive -EncodedCommand $encoded
+        if ($LASTEXITCODE -ne 0) {
+            throw "更新 Windows Terminal 配置失败，退出代码：$LASTEXITCODE"
+        }
+    } finally {
+        $env:SETMYPWSH_TERMINAL_SETTINGS = $previousPath
+    }
+
+    if (($result | Select-Object -Last 1) -eq 'unchanged') {
+        Write-Ok "Windows Terminal 已是目标配置：$SettingsPath"
+    } else {
+        Write-Ok "Windows Terminal 已更新：$SettingsPath"
+    }
+    Write-Ok '默认 Profile：PowerShell 7'
+    Write-Ok '默认字体：MesloLGM Nerd Font'
 }
 
 function Invoke-SetMyPwsh {
@@ -353,6 +511,9 @@ function Invoke-SetMyPwsh {
             $ProfilePath = Join-Path ([Environment]::GetFolderPath('MyDocuments')) 'PowerShell\Microsoft.PowerShell_profile.ps1'
             Write-Warn 'Dry Run 中未找到 pwsh，使用默认路径生成预览。'
         }
+        if ([string]::IsNullOrWhiteSpace($pwshPath)) {
+            $pwshPath = 'pwsh.exe'
+        }
     } else {
         $pwshPath = Find-Executable 'pwsh.exe'
         if ([string]::IsNullOrWhiteSpace($pwshPath)) {
@@ -373,6 +534,9 @@ function Invoke-SetMyPwsh {
     } elseif (-not $DryRun) {
         Write-Warn '未找到 oh-my-posh.exe，已跳过字体安装。重新打开终端后可以运行：oh-my-posh font install meslo'
     }
+
+    $terminalSettings = Resolve-WindowsTerminalSettingsPath
+    Set-WindowsTerminalDefaults -PwshPath $pwshPath -SettingsPath $terminalSettings
 
     Write-Host "`n完成！主题：$selectedTheme" -ForegroundColor Green
     Write-Host '请关闭并重新打开 Windows Terminal。'

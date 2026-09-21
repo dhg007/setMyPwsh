@@ -3,12 +3,25 @@ $root = $PSScriptRoot
 $scriptPath = Join-Path $root 'install.ps1'
 $testRoot = Join-Path ([IO.Path]::GetTempPath()) ('setMyPwsh-test-' + [Guid]::NewGuid().ToString('N'))
 $profilePath = Join-Path $testRoot 'Microsoft.PowerShell_profile.ps1'
+$terminalSettingsPath = Join-Path $testRoot 'settings.json'
 
 try {
     [void](New-Item -ItemType Directory -Force -Path $testRoot)
     [IO.File]::WriteAllText($profilePath, "function UserConfig { 'preserve me' }`r`n")
+    [IO.File]::WriteAllText($terminalSettingsPath, @'
+{
+    // Existing user setting must be preserved.
+    "copyOnSelect": true,
+    "profiles": {
+        "defaults": {
+            "opacity": 90
+        },
+        "list": [],
+    },
+}
+'@)
 
-    & $scriptPath -Yes -Theme atomic -SkipFont -ProfilePath $profilePath
+    & $scriptPath -Yes -Theme atomic -SkipFont -ProfilePath $profilePath -TerminalSettingsPath $terminalSettingsPath
 
     $first = [IO.File]::ReadAllText($profilePath)
     if ($first -notmatch 'function UserConfig') { throw '原有 Profile 内容丢失。' }
@@ -17,7 +30,18 @@ try {
         throw '受管区块数量不正确。'
     }
 
-    & $scriptPath -Yes -Theme paradox -SkipFont -ProfilePath $profilePath
+    $terminal = [IO.File]::ReadAllText($terminalSettingsPath) | ConvertFrom-Json
+    if ($terminal.defaultProfile -ne '{574e775e-4f2a-5b96-ac1e-a2962a402336}') {
+        throw 'Windows Terminal 默认 Profile 未设置为 PowerShell 7。'
+    }
+    if ($terminal.profiles.defaults.font.face -ne 'MesloLGM Nerd Font') {
+        throw 'Windows Terminal 字体未正确设置。'
+    }
+    if (-not $terminal.copyOnSelect -or $terminal.profiles.defaults.opacity -ne 90) {
+        throw 'Windows Terminal 原有配置未被保留。'
+    }
+
+    & $scriptPath -Yes -Theme paradox -SkipFont -ProfilePath $profilePath -TerminalSettingsPath $terminalSettingsPath
 
     $second = [IO.File]::ReadAllText($profilePath)
     if ($second -match "--config 'atomic'") { throw '旧主题仍然存在。' }
@@ -29,7 +53,7 @@ try {
     $backups = @(Get-ChildItem -LiteralPath $testRoot -Filter '*.setMyPwsh-backup-*')
     if ($backups.Count -lt 2) { throw '没有按预期创建 Profile 备份。' }
 
-    & $scriptPath -Yes -Theme paradox -SkipFont -ProfilePath $profilePath
+    & $scriptPath -Yes -Theme paradox -SkipFont -ProfilePath $profilePath -TerminalSettingsPath $terminalSettingsPath
     $third = [IO.File]::ReadAllText($profilePath)
     $backupsAfterNoChange = @(Get-ChildItem -LiteralPath $testRoot -Filter '*.setMyPwsh-backup-*')
     if ($third -cne $second) { throw '相同配置重复运行后文件发生变化。' }

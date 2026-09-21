@@ -8,6 +8,9 @@
 - PowerShell 7
 - Oh My Posh
 - 可选的 Meslo Nerd Font
+- 重复运行时检测已安装的 Meslo 字体，不会再次提示安装
+- 将 PowerShell 7 设置为 Windows Terminal 默认 Profile
+- 将 Windows Terminal 默认字体设置为 MesloLGM Nerd Font
 - PSReadLine 历史预测和列表视图
 - Oh My Posh 主题
 - Git 快捷函数（不安装 Git）
@@ -71,3 +74,4 @@ iex ((irm https://raw.githubusercontent.com/dhg007/setMyPwsh/main/install.ps1).T
 | `-SkipFont` | 不安装 Meslo Nerd Font |
 | `-DryRun` | 只检查和预览，不产生更改 |
 | `-ProfilePath PATH` | 指定 Profile 路径，主要用于测试 |
+| `-TerminalSettingsPath PATH` | 指定 Windows Terminal 配置路径，主要用于测试 |
