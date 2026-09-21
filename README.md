@@ -1,6 +1,8 @@
 # setMyPwsh 一键安装脚本
 
-兼容 Windows PowerShell 5.1 和 PowerShell 7。
+[仓库地址](https://github.com/dhg007/setMyPwsh)
+
+支持在 Windows PowerShell 5.1 或 PowerShell 7 中一键安装。
 
 它会安装或配置：
 
@@ -17,33 +19,9 @@
 - Git 快捷函数（不安装 Git）
 - 安装后的 `setMyPwsh` 本地管理命令
 
-## 本地运行
-
-```powershell
-.\install.ps1
-```
-
-如果执行策略阻止本地脚本，可以只对这一次进程放行：
-
-```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
-```
-
-无人值守模式：
-
-```powershell
-.\install.ps1 -Yes -Theme atomic -SkipFont
-```
-
-仅预览，不安装软件、不修改文件：
-
-```powershell
-.\install.ps1 -DryRun -Yes -Theme atomic -SkipFont
-```
-
 ## 一行远程安装
 
-在 Windows PowerShell 中运行：
+在 Windows PowerShell 5.1 或 PowerShell 7 中运行：
 
 ```powershell
 iex ((irm https://raw.githubusercontent.com/dhg007/setMyPwsh/main/install.ps1).TrimStart([char]0xFEFF))
@@ -69,13 +47,7 @@ setMyPwsh update
 
 其中 `setMyPwsh theme` 会显示主题菜单，`setMyPwsh theme atomic` 会直接切换到指定主题。`update` 会获取最新版 setMyPwsh 并重新应用配置。
 
-高级用户如需在首次远程安装时传递参数，可以把下载内容转换成 ScriptBlock：
-
-```powershell
-& ([scriptblock]::Create((irm https://raw.githubusercontent.com/dhg007/setMyPwsh/main/install.ps1).TrimStart([char]0xFEFF))) -Yes -Theme atomic -SkipFont
-```
-
-建议在发布文档中同时提供“先查看脚本”的链接，不要使用会随意指向不同内容的短网址。
+运行前可以先[查看安装脚本](https://github.com/dhg007/setMyPwsh/blob/main/install.ps1)。
 
 ## Profile 安全策略
 
@@ -91,9 +63,35 @@ setMyPwsh update
 
 `gp` 默认是 PowerShell 的 `Get-ItemProperty` 别名。为了让 `gp` 执行 `git push`，受管区块会移除该别名。
 
-## 参数
+## 本地运行
 
-以下参数在本地执行 `install.ps1` 时可以直接使用。远程执行时，请使用上面的 ScriptBlock 写法传递参数；不能把参数直接追加到 `irm ... | iex` 后面。
+```powershell
+git clone https://github.com/dhg007/setMyPwsh
+cd setMyPwsh
+.\install.ps1
+```
+
+如果执行策略阻止本地脚本，可以只对这一次进程放行：
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
+```
+
+无人值守模式：
+
+```powershell
+.\install.ps1 -Yes -Theme atomic -SkipFont
+```
+
+仅预览，不安装软件、不修改文件：
+
+```powershell
+.\install.ps1 -DryRun -Yes -Theme atomic -SkipFont
+```
+
+以下参数在本地执行 `install.ps1` 时可以直接使用。
+
+## 参数
 
 | 参数 | 作用 |
 | --- | --- |
@@ -104,3 +102,20 @@ setMyPwsh update
 | `-ProfilePath PATH` | 指定 Profile 路径，主要用于测试 |
 | `-TerminalSettingsPath PATH` | 指定 Windows Terminal 配置路径，主要用于测试 |
 | `-CommandInstallPath PATH` | 指定管理脚本安装路径，主要用于测试 |
+
+## 关键目录说明
+
+为了方便检查和清理，下面列出 setMyPwsh 会读取或写入的主要位置。`%LOCALAPPDATA%` 和 `%USERPROFILE%` 都表示当前用户自己的目录。
+
+| 位置 | 用途 |
+| --- | --- |
+| `%LOCALAPPDATA%\setMyPwsh\setMyPwsh.ps1` | setMyPwsh 本地管理命令的实际脚本，会保留在本机 |
+| PowerShell 7 的 `$PROFILE.CurrentUserCurrentHost` | 写入受管配置区块；常见位置为 `%USERPROFILE%\Documents\PowerShell\Microsoft.PowerShell_profile.ps1`，实际路径由 PowerShell 7 决定 |
+| `<Profile路径>.setMyPwsh-backup-时间戳` | 修改已有 Profile 前生成的备份文件，与 Profile 放在同一目录 |
+| `%LOCALAPPDATA%\Packages\Microsoft.WindowsTerminal_8wekyb3d8bbwe\LocalState\settings.json` | Windows Terminal 稳定版配置；设置默认 Profile 和字体 |
+| `%LOCALAPPDATA%\Packages\Microsoft.WindowsTerminalPreview_8wekyb3d8bbwe\LocalState\settings.json` | Windows Terminal Preview 配置，仅在检测到该版本时使用 |
+| `%LOCALAPPDATA%\Microsoft\Windows Terminal\settings.json` | 非商店版 Windows Terminal 的候选配置路径 |
+
+更新 Profile、管理脚本或 Terminal 配置时，脚本会在目标文件旁创建名称以 `.setMyPwsh-` 开头的临时文件；写入完成后会自动删除。通过远程一行命令执行时，下载的 `install.ps1` 只在当前 PowerShell 进程中运行，不会另外保存到磁盘。
+
+Windows Terminal、PowerShell 7 和 Oh My Posh 由 WinGet 安装，Meslo Nerd Font 由 Oh My Posh 安装；它们的最终安装目录由 WinGet、Oh My Posh 和 Windows 决定，setMyPwsh 不会自行指定其他隐藏目录。
