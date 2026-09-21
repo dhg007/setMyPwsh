@@ -10,7 +10,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$script:Version = '0.1.0'
+$script:Version = '0.1.1'
 $script:StartMarker = '# >>> setMyPwsh managed block >>>'
 $script:EndMarker = '# <<< setMyPwsh managed block <<<'
 $script:RecommendedThemes = @(
@@ -283,9 +283,13 @@ function Get-InstallerBlock {
 }
 
 function Invoke-Installer {
-    param([string[]]$Arguments)
+    param([string]$ThemeName)
     $installer = Get-InstallerBlock
-    & $installer @Arguments
+    if ([string]::IsNullOrWhiteSpace($ThemeName)) {
+        & $installer
+    } else {
+        & $installer -Theme $ThemeName
+    }
 }
 
 function Select-Theme {
@@ -328,16 +332,16 @@ switch ($Command.ToLowerInvariant()) {
     'theme' {
         $theme = $Value
         if ([string]::IsNullOrWhiteSpace($theme)) { $theme = Select-Theme }
-        Invoke-Installer -Arguments @('-Theme', $theme)
+        Invoke-Installer -ThemeName $theme
     }
     'check' {
         Show-Status
     }
     'repair' {
-        Invoke-Installer -Arguments @()
+        Invoke-Installer
     }
     'update' {
-        Invoke-Installer -Arguments @()
+        Invoke-Installer
     }
     { $_ -in @('help', '-h', '--help') } {
         Write-Host @"

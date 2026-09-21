@@ -35,6 +35,29 @@ try {
     $commandHelp = & pwsh.exe -NoLogo -NoProfile -File $commandPath help | Out-String
     if ($commandHelp -notmatch 'setMyPwsh theme') { throw '管理命令帮助输出不正确。' }
 
+    $themeForwardingTestPath = Join-Path $testRoot 'theme-forwarding-test.ps1'
+    $themeCapturePath = Join-Path $testRoot 'forwarded-theme.txt'
+    [IO.File]::WriteAllText($themeForwardingTestPath, @'
+param(
+    [string]$ManagementCommandPath,
+    [string]$CapturePath
+)
+
+$env:SETMYPWSH_THEME_CAPTURE = $CapturePath
+function Invoke-RestMethod {
+    return @"
+param([string]`$Theme)
+[IO.File]::WriteAllText(`$env:SETMYPWSH_THEME_CAPTURE, `$Theme)
+"@
+}
+& $ManagementCommandPath theme atomic
+'@, [Text.UTF8Encoding]::new($true))
+    & pwsh.exe -NoLogo -NoProfile -File $themeForwardingTestPath -ManagementCommandPath $commandPath -CapturePath $themeCapturePath
+    if ($LASTEXITCODE -ne 0) { throw '管理命令主题参数转发测试失败。' }
+    if ([IO.File]::ReadAllText($themeCapturePath) -ne 'atomic') {
+        throw '管理命令没有把 atomic 正确绑定到安装脚本的 Theme 参数。'
+    }
+
     $terminal = [IO.File]::ReadAllText($terminalSettingsPath) | ConvertFrom-Json
     if ($terminal.defaultProfile -ne '{574e775e-4f2a-5b96-ac1e-a2962a402336}') {
         throw 'Windows Terminal 默认 Profile 未设置为 PowerShell 7。'
