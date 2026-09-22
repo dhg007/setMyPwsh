@@ -48,6 +48,7 @@ setMyPwsh theme atomic
 setMyPwsh check
 setMyPwsh repair
 setMyPwsh update
+setMyPwsh uninstall
 ```
 
 其中 `setMyPwsh theme` 会显示主题菜单，菜单第 8 项用于选择本地自定义主题；
@@ -69,6 +70,22 @@ setMyPwsh theme
 ```
 
 选择第 8 项后，脚本会列出目录中的主题文件供用户选择。支持 `.omp.json`、`.omp.yaml`、`.omp.yml` 和 `.omp.toml`，更新 setMyPwsh 时不会删除这些文件。
+
+### 卸载
+
+普通卸载会移除 PowerShell Profile 中的 setMyPwsh 受管区块和本地管理脚本，但保留自定义主题：
+
+```powershell
+setMyPwsh uninstall
+```
+
+如果还要删除 `%LOCALAPPDATA%\setMyPwsh\customThemes` 中的全部自定义主题：
+
+```powershell
+setMyPwsh uninstall --purge-data
+```
+
+两种卸载方式都会先要求确认并备份当前 Profile。卸载不会删除 PowerShell 7、Windows Terminal、Oh My Posh、Meslo Nerd Font，也不会还原 Windows Terminal 的默认 Profile 和字体设置。
 
 运行前可以先[查看安装脚本](https://github.com/dhg007/setMyPwsh/blob/main/install.ps1)。
 
@@ -136,6 +153,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
 | `%LOCALAPPDATA%\setMyPwsh\customThemes` | 用户自定义主题目录，setMyPwsh 更新时不会删除其中的文件 |
 | PowerShell 7 的 `$PROFILE.CurrentUserCurrentHost` | 写入受管配置区块；常见位置为 `%USERPROFILE%\Documents\PowerShell\Microsoft.PowerShell_profile.ps1`，实际路径由 PowerShell 7 决定 |
 | `<Profile路径>.setMyPwsh-backup-时间戳` | 修改已有 Profile 前生成的备份文件，与 Profile 放在同一目录 |
+| `<Profile路径>.setMyPwsh-uninstall-backup-时间戳` | 卸载前生成的 Profile 备份文件，与 Profile 放在同一目录 |
 | `%LOCALAPPDATA%\Packages\Microsoft.WindowsTerminal_8wekyb3d8bbwe\LocalState\settings.json` | Windows Terminal 稳定版配置；设置默认 Profile 和字体 |
 | `%LOCALAPPDATA%\Packages\Microsoft.WindowsTerminalPreview_8wekyb3d8bbwe\LocalState\settings.json` | Windows Terminal Preview 配置，仅在检测到该版本时使用 |
 | `%LOCALAPPDATA%\Microsoft\Windows Terminal\settings.json` | 非商店版 Windows Terminal 的候选配置路径 |

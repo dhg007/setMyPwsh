@@ -157,6 +157,65 @@ if ([string]::IsNullOrWhiteSpace($env:POSH_CONFIG)) {
     & pwsh.exe -NoLogo -NoProfile -File $activationTestPath -InstallerPath $scriptPath -TestProfilePath $profilePath -TestTerminalSettingsPath $terminalSettingsPath -TestCommandPath $commandPath
     if ($LASTEXITCODE -ne 0) { throw 'PowerShell 7 当前会话激活测试失败。' }
 
+    $uninstallHarnessPath = Join-Path $testRoot 'uninstall-harness.ps1'
+    [IO.File]::WriteAllText($uninstallHarnessPath, @'
+param(
+    [string]$ManagementCommandPath,
+    [string]$Option
+)
+function Read-Host { return 'y' }
+if ([string]::IsNullOrWhiteSpace($Option)) {
+    & $ManagementCommandPath uninstall
+} else {
+    & $ManagementCommandPath uninstall $Option
+}
+'@, [Text.UTF8Encoding]::new($true))
+
+    $normalUninstallRoot = Join-Path $testRoot 'normal-uninstall'
+    $normalInstallRoot = Join-Path $normalUninstallRoot 'setMyPwsh'
+    $normalCommandPath = Join-Path $normalInstallRoot 'setMyPwsh.ps1'
+    $normalProfilePath = Join-Path $normalUninstallRoot 'Microsoft.PowerShell_profile.ps1'
+    $normalTerminalPath = Join-Path $normalUninstallRoot 'settings.json'
+    [void](New-Item -ItemType Directory -Force -Path $normalUninstallRoot)
+    [IO.File]::WriteAllText($normalProfilePath, "function KeepAfterUninstall { 'keep' }`r`n")
+    [IO.File]::WriteAllText($normalTerminalPath, '{}')
+    & $scriptPath -Yes -Theme atomic -SkipFont -ProfilePath $normalProfilePath -TerminalSettingsPath $normalTerminalPath -CommandInstallPath $normalCommandPath
+    $normalCustomTheme = Join-Path $normalInstallRoot 'customThemes\keep.omp.json'
+    [IO.File]::WriteAllText($normalCustomTheme, '{"version":4,"blocks":[]}', [Text.UTF8Encoding]::new($false))
+
+    & pwsh.exe -NoLogo -NoProfile -File $uninstallHarnessPath -ManagementCommandPath $normalCommandPath
+    if ($LASTEXITCODE -ne 0) { throw '普通卸载测试失败。' }
+    $normalProfileAfter = [IO.File]::ReadAllText($normalProfilePath)
+    if ($normalProfileAfter -notmatch 'KeepAfterUninstall') { throw '普通卸载删除了用户 Profile 内容。' }
+    if ($normalProfileAfter -match 'setMyPwsh managed block') { throw '普通卸载没有移除 Profile 受管区块。' }
+    if (Test-Path -LiteralPath $normalCommandPath) { throw '普通卸载没有删除管理脚本。' }
+    if (-not (Test-Path -LiteralPath $normalCustomTheme -PathType Leaf)) { throw '普通卸载不应删除自定义主题。' }
+    if (@(Get-ChildItem -LiteralPath $normalUninstallRoot -Filter '*.setMyPwsh-uninstall-backup-*').Count -ne 1) {
+        throw '普通卸载没有备份 Profile。'
+    }
+
+    $purgeUninstallRoot = Join-Path $testRoot 'purge-uninstall'
+    $purgeInstallRoot = Join-Path $purgeUninstallRoot 'setMyPwsh'
+    $purgeCommandPath = Join-Path $purgeInstallRoot 'setMyPwsh.ps1'
+    $purgeProfilePath = Join-Path $purgeUninstallRoot 'Microsoft.PowerShell_profile.ps1'
+    $purgeTerminalPath = Join-Path $purgeUninstallRoot 'settings.json'
+    [void](New-Item -ItemType Directory -Force -Path $purgeUninstallRoot)
+    [IO.File]::WriteAllText($purgeProfilePath, "function KeepAfterPurge { 'keep' }`r`n")
+    [IO.File]::WriteAllText($purgeTerminalPath, '{}')
+    & $scriptPath -Yes -Theme atomic -SkipFont -ProfilePath $purgeProfilePath -TerminalSettingsPath $purgeTerminalPath -CommandInstallPath $purgeCommandPath
+    $purgeCustomTheme = Join-Path $purgeInstallRoot 'customThemes\remove.omp.json'
+    [IO.File]::WriteAllText($purgeCustomTheme, '{"version":4,"blocks":[]}', [Text.UTF8Encoding]::new($false))
+
+    & pwsh.exe -NoLogo -NoProfile -File $uninstallHarnessPath -ManagementCommandPath $purgeCommandPath -Option '--purge-data'
+    if ($LASTEXITCODE -ne 0) { throw '彻底删除本地数据测试失败。' }
+    $purgeProfileAfter = [IO.File]::ReadAllText($purgeProfilePath)
+    if ($purgeProfileAfter -notmatch 'KeepAfterPurge') { throw '--purge-data 删除了用户 Profile 内容。' }
+    if ($purgeProfileAfter -match 'setMyPwsh managed block') { throw '--purge-data 没有移除 Profile 受管区块。' }
+    if (Test-Path -LiteralPath $purgeInstallRoot) { throw '--purge-data 没有删除 setMyPwsh 本地数据目录。' }
+    if (@(Get-ChildItem -LiteralPath $purgeUninstallRoot -Filter '*.setMyPwsh-uninstall-backup-*').Count -ne 1) {
+        throw '--purge-data 没有备份 Profile。'
+    }
+
     Write-Host 'All tests passed.' -ForegroundColor Green
 } finally {
     if (Test-Path -LiteralPath $testRoot) {

@@ -10,7 +10,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$script:Version = '0.2.0'
+$script:Version = '0.3.0'
 $script:StartMarker = '# >>> setMyPwsh managed block >>>'
 $script:EndMarker = '# <<< setMyPwsh managed block <<<'
 $script:RecommendedThemes = @(
@@ -273,7 +273,10 @@ function Resolve-CommandInstallPath {
 }
 
 function Install-ManagementCommand {
-    param([Parameter(Mandatory = $true)][string]$Path)
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$ManagedProfilePath
+    )
 
     Write-Step '安装 setMyPwsh 管理命令'
     if ($DryRun) {
@@ -291,7 +294,9 @@ param(
 $ErrorActionPreference = 'Stop'
 $installerUrl = 'https://raw.githubusercontent.com/dhg007/setMyPwsh/main/install.ps1'
 $themes = @('jandedobbeleer', 'atomic', 'paradox', 'powerlevel10k_rainbow', 'tokyo', 'minimal')
-$customThemesDirectory = Join-Path $PSScriptRoot 'customThemes'
+$installRoot = '{{INSTALL_ROOT}}'
+$managedProfilePath = '{{PROFILE_PATH}}'
+$customThemesDirectory = Join-Path $installRoot 'customThemes'
 
 function Get-InstallerBlock {
     Write-Host '正在获取最新版 setMyPwsh...' -ForegroundColor Cyan
@@ -372,6 +377,100 @@ function Show-Status {
     }
 }
 
+function Remove-ManagedProfileBlock {
+    if (-not (Test-Path -LiteralPath $managedProfilePath -PathType Leaf)) {
+        Write-Host "[--] 未找到 PowerShell Profile：$managedProfilePath" -ForegroundColor Yellow
+        return
+    }
+
+    $content = [IO.File]::ReadAllText($managedProfilePath)
+    $startMarker = '# >>> setMyPwsh managed block >>>'
+    $endMarker = '# <<< setMyPwsh managed block <<<'
+    $start = $content.IndexOf($startMarker, [StringComparison]::Ordinal)
+    $end = $content.IndexOf($endMarker, [StringComparison]::Ordinal)
+    if (($start -ge 0) -xor ($end -ge 0)) {
+        throw 'Profile 中的 setMyPwsh 标记不完整，已停止卸载以保护用户配置。'
+    }
+    if ($start -lt 0) {
+        Write-Host '[--] Profile 中没有 setMyPwsh 受管区块。' -ForegroundColor Yellow
+        return
+    }
+    if ($end -lt $start) {
+        throw 'Profile 中的 setMyPwsh 标记顺序无效，已停止卸载以保护用户配置。'
+    }
+
+    $end += $endMarker.Length
+    $updated = $content.Substring(0, $start) + $content.Substring($end)
+    $directory = Split-Path -Parent $managedProfilePath
+    $tempPath = Join-Path $directory ('.setMyPwsh-uninstall-' + [Guid]::NewGuid().ToString('N') + '.tmp')
+    $backupPath = $managedProfilePath + '.setMyPwsh-uninstall-backup-' + (Get-Date -Format 'yyyyMMdd-HHmmss.fff')
+    try {
+        [IO.File]::WriteAllText($tempPath, $updated, [Text.UTF8Encoding]::new($false))
+        [IO.File]::Replace($tempPath, $managedProfilePath, $backupPath, $true)
+    } finally {
+        if (Test-Path -LiteralPath $tempPath) {
+            Remove-Item -LiteralPath $tempPath -Force
+        }
+    }
+    Write-Host "[OK] 已移除 Profile 受管区块：$managedProfilePath" -ForegroundColor Green
+    Write-Host "[OK] 原 Profile 已备份：$backupPath" -ForegroundColor Green
+}
+
+function Invoke-Uninstall {
+    param([string]$Option)
+
+    if (-not [string]::IsNullOrWhiteSpace($Option) -and $Option -ne '--purge-data') {
+        throw "未知卸载参数：$Option。可用参数：--purge-data"
+    }
+    $purgeData = $Option -eq '--purge-data'
+
+    Write-Host '将卸载 setMyPwsh：' -ForegroundColor Cyan
+    Write-Host '  - 移除 PowerShell Profile 中的 setMyPwsh 受管区块'
+    Write-Host '  - 删除 setMyPwsh 本地管理脚本'
+    if ($purgeData) {
+        Write-Host '  - 删除全部本地自定义主题' -ForegroundColor Yellow
+    } else {
+        Write-Host "  - 保留自定义主题：$customThemesDirectory"
+    }
+    Write-Host '  - 保留 PowerShell 7、Windows Terminal、Oh My Posh、字体和 Terminal 设置'
+    $answer = Read-Host '确认卸载？[y/N]'
+    if ($answer -notmatch '^(?i:y|yes|是)$') {
+        Write-Host '已取消卸载。' -ForegroundColor Yellow
+        return
+    }
+
+    Remove-ManagedProfileBlock
+
+    $resolvedRoot = [IO.Path]::GetFullPath($installRoot).TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
+    $resolvedThemes = [IO.Path]::GetFullPath($customThemesDirectory)
+    $rootPrefix = $resolvedRoot + [IO.Path]::DirectorySeparatorChar
+    if (-not $resolvedThemes.StartsWith($rootPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+        throw '自定义主题目录不在 setMyPwsh 安装目录内，已拒绝删除。'
+    }
+
+    if ($purgeData -and (Test-Path -LiteralPath $resolvedThemes -PathType Container)) {
+        Remove-Item -LiteralPath $resolvedThemes -Recurse -Force
+        Write-Host "[OK] 已删除自定义主题：$resolvedThemes" -ForegroundColor Green
+    }
+
+    $managementScriptPath = '{{MANAGEMENT_PATH}}'
+    if (Test-Path -LiteralPath $managementScriptPath -PathType Leaf) {
+        Remove-Item -LiteralPath $managementScriptPath -Force
+        Write-Host "[OK] 已删除管理脚本：$managementScriptPath" -ForegroundColor Green
+    }
+
+    if ($purgeData -and (Test-Path -LiteralPath $resolvedRoot -PathType Container)) {
+        $remaining = @(Get-ChildItem -LiteralPath $resolvedRoot -Force -ErrorAction SilentlyContinue)
+        if ($remaining.Count -eq 0) {
+            Remove-Item -LiteralPath $resolvedRoot -Force
+        } else {
+            Write-Host "[!] 安装目录中仍有非 setMyPwsh 管理的文件，已保留：$resolvedRoot" -ForegroundColor Yellow
+        }
+    }
+
+    Write-Host '卸载完成。请关闭并重新打开 PowerShell。' -ForegroundColor Green
+}
+
 switch ($Command.ToLowerInvariant()) {
     'theme' {
         $theme = $Value
@@ -388,6 +487,9 @@ switch ($Command.ToLowerInvariant()) {
     'update' {
         Invoke-Installer
     }
+    'uninstall' {
+        Invoke-Uninstall -Option $Value
+    }
     { $_ -in @('help', '-h', '--help') } {
         Write-Host @"
 setMyPwsh 管理命令
@@ -399,6 +501,9 @@ setMyPwsh 管理命令
   setMyPwsh check              检查组件状态
   setMyPwsh repair             重新检查并应用配置
   setMyPwsh update             获取最新版并重新应用配置
+  setMyPwsh uninstall          卸载并保留自定义主题
+  setMyPwsh uninstall --purge-data
+                               卸载并删除自定义主题
   setMyPwsh help               显示帮助
 "@
     }
@@ -408,7 +513,10 @@ setMyPwsh 管理命令
 }
 '@
 
-    $directory = Split-Path -Parent $Path
+    $directory = [IO.Path]::GetFullPath((Split-Path -Parent $Path))
+    $managementScript = $managementScript.Replace('{{INSTALL_ROOT}}', $directory.Replace("'", "''"))
+    $managementScript = $managementScript.Replace('{{PROFILE_PATH}}', $ManagedProfilePath.Replace("'", "''"))
+    $managementScript = $managementScript.Replace('{{MANAGEMENT_PATH}}', ([IO.Path]::GetFullPath($Path)).Replace("'", "''"))
     [void](New-Item -ItemType Directory -Force -Path $directory)
     [void](New-Item -ItemType Directory -Force -Path (Join-Path $directory 'customThemes'))
     $tempPath = Join-Path $directory ('.setMyPwsh-command-' + [Guid]::NewGuid().ToString('N') + '.tmp')
@@ -800,7 +908,7 @@ function Invoke-SetMyPwsh {
     }
     $selectedTheme = Resolve-ThemeConfig -Value $selectedTheme
     $managementCommandPath = Resolve-CommandInstallPath
-    Install-ManagementCommand -Path $managementCommandPath
+    Install-ManagementCommand -Path $managementCommandPath -ManagedProfilePath $resolvedProfile
     Set-PowerShellProfile -Path $resolvedProfile -ThemeName $selectedTheme
 
     $ompPath = Find-Executable 'oh-my-posh.exe'
